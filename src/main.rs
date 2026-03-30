@@ -22,7 +22,7 @@ use rand::Rng;
 use vehicle::{Direction, Route, Speed, Vehicle};
 use intersection::{Intersection, SAFE_DISTANCE, CLOSE_CALL_DIST, WINDOW_W, WINDOW_H};
 use stats::Stats;
-use renderer::{draw_world, draw_stats_screen};
+use renderer::{draw_world, draw_stats_screen, SeaTextures};
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -53,6 +53,10 @@ fn main() {
         .expect("Canvas creation failed");
 
     let mut event_pump = sdl_context.event_pump().expect("Event pump failed");
+
+    // Load sea-themed tile textures (embedded at compile time via include_bytes!)
+    let texture_creator = canvas.texture_creator();
+    let sea_textures    = SeaTextures::load(&texture_creator);
 
     let mut intersection  = Intersection::new();
     let mut vehicles: Vec<Vehicle> = Vec::new();
@@ -125,7 +129,7 @@ fn main() {
         collect_finished(&mut vehicles, &mut stats);
 
         // ── Render ───────────────────────────────────────────────────────
-        draw_world(&mut canvas, &vehicles, random_mode);
+        draw_world(&mut canvas, &vehicles, random_mode, &sea_textures);
         canvas.present();
 
         tick += 1;
