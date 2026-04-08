@@ -376,13 +376,16 @@ fn update_reservations_and_move(
         }
 
         if was_in_zone && !now_in_zone && vehicles[i].reservation_id.is_some() {
-            Intersection::release_reservation(&mut vehicles[i]);
+            intersection.release_reservation(&mut vehicles[i]);
         }
 
         let velocity_px_s = vehicles[i].speed.pixels_per_tick() * TARGET_FPS as f32;
         stats.observe_velocity(velocity_px_s);
 
         if finished {
+            if vehicles[i].reservation_id.is_some() {
+                intersection.release_reservation(&mut vehicles[i]);
+            }
             if let Some(crossing_time) = vehicles[i].crossing_time() {
                 stats.record_passed_vehicle(crossing_time);
             }
@@ -396,12 +399,12 @@ fn update_reservations_and_move(
 }
 
 fn near_conflict_zone(v: &Vehicle) -> bool {
-    // Request reservation before the center box to avoid last-second braking.
-    let margin = 90.0;
-    let min_x = intersection::ISECT_X1 - margin;
-    let max_x = intersection::ISECT_X2 + margin;
-    let min_y = intersection::ISECT_Y1 - margin;
-    let max_y = intersection::ISECT_Y2 + margin;
+    // Request reservation shortly before entering the invisible grid zone.
+    let margin = 24.0;
+    let min_x = intersection::GRID_X1 - margin;
+    let max_x = intersection::GRID_X2 + margin;
+    let min_y = intersection::GRID_Y1 - margin;
+    let max_y = intersection::GRID_Y2 + margin;
     v.x >= min_x && v.x <= max_x && v.y >= min_y && v.y <= max_y
 }
 
@@ -422,10 +425,10 @@ fn will_enter_conflict_zone(v: &Vehicle) -> bool {
     let nx = v.x + dx / dist * step;
     let ny = v.y + dy / dist * step;
 
-    nx >= intersection::ISECT_X1
-        && nx <= intersection::ISECT_X2
-        && ny >= intersection::ISECT_Y1
-        && ny <= intersection::ISECT_Y2
+    nx >= intersection::GRID_X1
+        && nx <= intersection::GRID_X2
+        && ny >= intersection::GRID_Y1
+        && ny <= intersection::GRID_Y2
 }
 
 fn update_close_calls(
