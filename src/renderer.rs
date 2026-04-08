@@ -1,32 +1,44 @@
-// renderer.rs — Renders the pixel-art map.png as background, vehicles on top.
+// renderer.rs - Rendering for simulation scene and end stats scene.
 
 use sdl2::pixels::{Color, PixelFormatEnum};
-use sdl2::rect::{Point, Rect};
-use sdl2::render::{Canvas, Texture, TextureCreator};
+use sdl2::rect::Rect;
+use sdl2::render::{BlendMode, Canvas, Texture, TextureCreator};
 use sdl2::surface::Surface;
 use sdl2::video::{Window, WindowContext};
 
-use crate::intersection::{WINDOW_W, WINDOW_H};
-use crate::vehicle::Vehicle;
+use crate::animation::AnimDir;
 use crate::stats::Stats;
+use crate::vehicle::Vehicle;
 
-// ─── Texture bundle ───────────────────────────────────────────────────────────
+const CAR_W: u32 = 56;
+const CAR_H: u32 = 98;
 
-pub struct SeaTextures {
+pub struct GameTextures {
     pub map: Texture,
+    /// v1.png .. v7.png, indexed 0..6.
+    pub sprites: Vec<Texture>,
 }
 
-impl SeaTextures {
+impl GameTextures {
     pub fn load(tc: &TextureCreator<WindowContext>) -> Self {
-        SeaTextures {
-            map: load_png(tc, include_bytes!("assets/map.png")),
+        Self {
+            map: load_png(tc, include_bytes!("assets/map.png"), false),
+            sprites: vec![
+                load_png(tc, include_bytes!("assets/v1.png"), true),
+                load_png(tc, include_bytes!("assets/v2.png"), true),
+                load_png(tc, include_bytes!("assets/v3.png"), true),
+                load_png(tc, include_bytes!("assets/v4.png"), true),
+                load_png(tc, include_bytes!("assets/v5.png"), true),
+                load_png(tc, include_bytes!("assets/v6.png"), true),
+                load_png(tc, include_bytes!("assets/v7.png"), true),
+            ],
         }
     }
 }
 
-/// Decode an embedded PNG → SDL2 Texture using the pure-Rust `png` crate.
-fn load_png(tc: &TextureCreator<WindowContext>, bytes: &[u8]) -> Texture {
-    let decoder = png::Decoder::new(bytes);
+fn load_png(tc: &TextureCreator<WindowContext>, bytes: &[u8], alpha_blend: bool) -> Texture {
+    let mut decoder = png::Decoder::new(bytes);
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().expect("PNG read_info");
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).expect("PNG next_frame");
@@ -36,143 +48,193 @@ fn load_png(tc: &TextureCreator<WindowContext>, bytes: &[u8]) -> Texture {
 
     let mut rgba: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
-        png::ColorType::Rgb  => buf[..info.buffer_size()]
+        png::ColorType::Rgb => buf[..info.buffer_size()]
             .chunks_exact(3)
             .flat_map(|c| [c[0], c[1], c[2], 0xFF])
             .collect(),
-        other => panic!("Unsupported PNG colour type: {:?}", other),
+        png::ColorType::Grayscale => buf[..info.buffer_size()]
+            .iter()
+            .flat_map(|g| [*g, *g, *g, 0xFF])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => buf[..info.buffer_size()]
+            .chunks_exact(2)
+            .flat_map(|c| [c[0], c[0], c[0], c[1]])
+            .collect(),
+        other => panic!("Unsupported PNG color type: {:?}", other),
     };
 
-    // ABGR8888 on little-endian x86 stores bytes as [R,G,B,A] in memory —
-    // exactly what the PNG decoder outputs.
     let surface = Surface::from_data(&mut rgba, w, h, w * 4, PixelFormatEnum::ABGR8888)
         .expect("Surface::from_data");
-    tc.create_texture_from_surface(&surface)
-        .expect("create_texture_from_surface")
+
+    let mut tex = tc
+        .create_texture_from_surface(&surface)
+        .expect("create_texture_from_surface");
+
+    if alpha_blend {
+        tex.set_blend_mode(BlendMode::Blend);
+    }
+
+    tex
 }
 
-// ─── Public entry points ──────────────────────────────────────────────────────
-
-pub fn draw_world(
-    canvas:      &mut Canvas<Window>,
-    vehicles:    &[Vehicle],
-    random_mode: bool,
-    textures:    &SeaTextures,
+pub fn draw_simulation(
+    canvas: &mut Canvas<Window>,
+    vehicles: &[Vehicle],
+    textures: &GameTextures,
+    win_w: u32,
+    win_h: u32,
 ) {
-    // Stretch map.png to fill the entire window
     canvas
-        .copy(
-            &textures.map,
-            None,
-            Some(Rect::new(0, 0, WINDOW_W as u32, WINDOW_H as u32)),
-        )
+        .copy(&textures.map, None, Some(Rect::new(0, 0, win_w, win_h)))
         .expect("map copy");
 
-    draw_vehicles(canvas, vehicles);
-    draw_hud(canvas, random_mode);
-}
-
-// ─── Vehicle rendering ────────────────────────────────────────────────────────
-
-fn draw_vehicles(canvas: &mut Canvas<Window>, vehicles: &[Vehicle]) {
-    for v in vehicles {
-        if !v.active { continue; }
-
-        // Body
-        draw_rotated_rect(
-            canvas, v.x, v.y, 14.0, 22.0, v.angle,
-            Color::RGB(v.color_r, v.color_g, v.color_b),
-        );
-
-        // Dark outline for contrast against the sea
-        draw_rotated_rect(
-            canvas, v.x, v.y, 16.0, 24.0, v.angle,
-            Color::RGBA(0, 0, 0, 120),
-        );
-        draw_rotated_rect(
-            canvas, v.x, v.y, 14.0, 22.0, v.angle,
-            Color::RGB(v.color_r, v.color_g, v.color_b),
-        );
-
-        // White nose dot (direction indicator)
-        canvas.set_draw_color(Color::WHITE);
-        let nose_x = v.x + v.angle.to_radians().sin() * 8.0;
-        let nose_y = v.y - v.angle.to_radians().cos() * 8.0;
-        let _ = canvas.fill_rect(Rect::new(nose_x as i32 - 2, nose_y as i32 - 2, 4, 4));
+    for vehicle in vehicles {
+        draw_vehicle(canvas, vehicle, textures);
     }
 }
 
-/// Rasterise a filled rotated rectangle via scanline — no texture needed.
-fn draw_rotated_rect(
-    canvas:    &mut Canvas<Window>,
-    cx: f32,   cy: f32,
-    w:  f32,   h:  f32,
-    angle_deg: f32,
-    color:     Color,
-) {
-    let rad = angle_deg.to_radians();
-    let (s, c) = (rad.sin(), rad.cos());
-    let (hw, hh) = (w / 2.0, h / 2.0);
-
-    let corners: Vec<Point> = [(-hw,-hh),(hw,-hh),(hw,hh),(-hw,hh)]
-        .iter()
-        .map(|(lx, ly)| Point::new(
-            (cx + lx * c - ly * s) as i32,
-            (cy + lx * s + ly * c) as i32,
-        ))
-        .collect();
-
-    canvas.set_draw_color(color);
-    let min_y = corners.iter().map(|p| p.y).min().unwrap_or(0);
-    let max_y = corners.iter().map(|p| p.y).max().unwrap_or(0);
-    let n = corners.len();
-
-    for y in min_y..=max_y {
-        let mut xs: Vec<i32> = Vec::new();
-        for i in 0..n {
-            let (a, b) = (corners[i], corners[(i + 1) % n]);
-            if (a.y <= y && b.y > y) || (b.y <= y && a.y > y) {
-                let t = (y - a.y) as f32 / (b.y - a.y) as f32;
-                xs.push((a.x as f32 + t * (b.x - a.x) as f32) as i32);
-            }
-        }
-        if xs.len() >= 2 {
-            xs.sort_unstable();
-            let span = (xs[xs.len()-1] - xs[0]).unsigned_abs() + 1;
-            let _ = canvas.fill_rect(Rect::new(xs[0], y, span, 1));
-        }
-    }
-}
-
-// ─── HUD ─────────────────────────────────────────────────────────────────────
-
-fn draw_hud(canvas: &mut Canvas<Window>, random_mode: bool) {
-    if random_mode {
-        canvas.set_draw_color(Color::RGB(255, 100, 0));
-        let _ = canvas.fill_rect(Rect::new(WINDOW_W - 20, 5, 15, 15));
-    }
-}
-
-// ─── Statistics screen ────────────────────────────────────────────────────────
-
-pub fn draw_stats_screen(canvas: &mut Canvas<Window>, stats: &Stats) {
-    canvas.set_draw_color(Color::RGB(15, 15, 30));
+pub fn draw_stats_screen(canvas: &mut Canvas<Window>, stats: &Stats, win_w: u32, win_h: u32) {
+    canvas.set_draw_color(Color::RGB(16, 18, 24));
     canvas.clear();
 
-    let report = stats.report();
-    for (i, line) in report.iter().enumerate() {
-        println!("{}", line);
-        let y = 80 + i as i32 * 70;
-        canvas.set_draw_color(Color::RGB(40, 40, 80));
-        let _ = canvas.fill_rect(Rect::new(60, y, 680, 50));
-        let accent = Color::RGB(
-            (80 + i * 28).min(255) as u8,
-            (120 + i * 15).min(255) as u8,
-            200,
-        );
-        canvas.set_draw_color(accent);
-        let _ = canvas.fill_rect(Rect::new(62, y + 2, ((i + 1) * 90).min(660) as u32, 46));
+    let panel = Rect::new(70, 70, win_w.saturating_sub(140), win_h.saturating_sub(140));
+    canvas.set_draw_color(Color::RGB(34, 40, 56));
+    let _ = canvas.fill_rect(panel);
+
+    canvas.set_draw_color(Color::RGB(85, 96, 125));
+    let _ = canvas.draw_rect(panel);
+
+    let lines = stats.dashboard_lines();
+
+    let mut y = panel.y() + 30;
+    for (idx, line) in lines.iter().enumerate() {
+        let (scale, color) = if idx == 0 {
+            (4, Color::RGB(218, 226, 255))
+        } else {
+            (3, Color::RGB(209, 216, 240))
+        };
+
+        draw_text_3x5(canvas, panel.x() + 30, y, line, scale, color);
+        y += if idx == 0 { 42 } else { 34 };
     }
-    canvas.set_draw_color(Color::RGB(255, 200, 0));
-    let _ = canvas.fill_rect(Rect::new(60, 20, 680, 40));
+
+    draw_text_3x5(
+        canvas,
+        panel.x() + 30,
+        panel.bottom() - 30,
+        "PRESS ESC TO CLOSE",
+        2,
+        Color::RGB(170, 180, 208),
+    );
+}
+
+fn draw_vehicle(canvas: &mut Canvas<Window>, vehicle: &Vehicle, textures: &GameTextures) {
+    if textures.sprites.is_empty() {
+        return;
+    }
+
+    let sheet = &textures.sprites[(vehicle.sprite_index as usize).min(textures.sprites.len() - 1)];
+    let sheet_info = sheet.query();
+    let src = vehicle.anim.src_rect(sheet_info.width, sheet_info.height);
+
+    let dest = Rect::new(
+        vehicle.x as i32 - CAR_W as i32 / 2,
+        vehicle.y as i32 - CAR_H as i32 / 2,
+        CAR_W,
+        CAR_H,
+    );
+
+    // Keep row-based facing and apply a small continuous rotation offset for smooth turning.
+    let base = row_base_angle(vehicle.anim.dir);
+    let rot = normalize_degrees(vehicle.angle as f64 - base);
+
+    let _ = canvas.copy_ex(sheet, Some(src), Some(dest), rot, None, false, false);
+}
+
+fn row_base_angle(dir: AnimDir) -> f64 {
+    match dir {
+        AnimDir::Up => 0.0,
+        AnimDir::Right => 90.0,
+        AnimDir::Down => 180.0,
+        AnimDir::Left => 270.0,
+    }
+}
+
+fn normalize_degrees(angle: f64) -> f64 {
+    let mut a = angle % 360.0;
+    if a > 180.0 {
+        a -= 360.0;
+    }
+    if a < -180.0 {
+        a += 360.0;
+    }
+    a
+}
+
+fn draw_text_3x5(
+    canvas: &mut Canvas<Window>,
+    x: i32,
+    y: i32,
+    text: &str,
+    scale: u32,
+    color: Color,
+) {
+    canvas.set_draw_color(color);
+
+    let mut cursor_x = x;
+    for ch in text.chars() {
+        let glyph = glyph_3x5(ch);
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..3 {
+                let mask = 1 << (2 - col);
+                if bits & mask != 0 {
+                    let px = cursor_x + (col as i32 * scale as i32);
+                    let py = y + (row as i32 * scale as i32);
+                    let _ = canvas.fill_rect(Rect::new(px, py, scale, scale));
+                }
+            }
+        }
+        cursor_x += (4 * scale) as i32;
+    }
+}
+
+fn glyph_3x5(ch: char) -> [u8; 5] {
+    match ch.to_ascii_uppercase() {
+        'A' => [0b010, 0b101, 0b111, 0b101, 0b101],
+        'B' => [0b110, 0b101, 0b110, 0b101, 0b110],
+        'C' => [0b011, 0b100, 0b100, 0b100, 0b011],
+        'D' => [0b110, 0b101, 0b101, 0b101, 0b110],
+        'E' => [0b111, 0b100, 0b110, 0b100, 0b111],
+        'H' => [0b101, 0b101, 0b111, 0b101, 0b101],
+        'I' => [0b111, 0b010, 0b010, 0b010, 0b111],
+        'K' => [0b101, 0b101, 0b110, 0b101, 0b101],
+        'L' => [0b100, 0b100, 0b100, 0b100, 0b111],
+        'M' => [0b101, 0b111, 0b111, 0b101, 0b101],
+        'N' => [0b101, 0b111, 0b111, 0b111, 0b101],
+        'O' => [0b010, 0b101, 0b101, 0b101, 0b010],
+        'P' => [0b110, 0b101, 0b110, 0b100, 0b100],
+        'R' => [0b110, 0b101, 0b110, 0b101, 0b101],
+        'S' => [0b011, 0b100, 0b010, 0b001, 0b110],
+        'T' => [0b111, 0b010, 0b010, 0b010, 0b010],
+        'U' => [0b101, 0b101, 0b101, 0b101, 0b111],
+        'V' => [0b101, 0b101, 0b101, 0b101, 0b010],
+        'X' => [0b101, 0b101, 0b010, 0b101, 0b101],
+        'Y' => [0b101, 0b101, 0b010, 0b010, 0b010],
+        '0' => [0b111, 0b101, 0b101, 0b101, 0b111],
+        '1' => [0b010, 0b110, 0b010, 0b010, 0b111],
+        '2' => [0b111, 0b001, 0b111, 0b100, 0b111],
+        '3' => [0b111, 0b001, 0b111, 0b001, 0b111],
+        '4' => [0b101, 0b101, 0b111, 0b001, 0b001],
+        '5' => [0b111, 0b100, 0b111, 0b001, 0b111],
+        '6' => [0b111, 0b100, 0b111, 0b101, 0b111],
+        '7' => [0b111, 0b001, 0b001, 0b001, 0b001],
+        '8' => [0b111, 0b101, 0b111, 0b101, 0b111],
+        '9' => [0b111, 0b101, 0b111, 0b001, 0b111],
+        ':' => [0b000, 0b010, 0b000, 0b010, 0b000],
+        '/' => [0b001, 0b001, 0b010, 0b100, 0b100],
+        '.' => [0b000, 0b000, 0b000, 0b000, 0b010],
+        '-' => [0b000, 0b000, 0b111, 0b000, 0b000],
+        ' ' => [0b000, 0b000, 0b000, 0b000, 0b000],
+        _ => [0b111, 0b101, 0b010, 0b000, 0b010],
+    }
 }

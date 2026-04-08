@@ -1,8 +1,9 @@
-// vehicle.rs — Vehicle struct, kinematics, and routing logic
+// vehicle.rs - Vehicle model, kinematics, and route following.
 
 use std::time::Instant;
 
-/// Cardinal direction a vehicle enters/exits from
+use crate::animation::AnimState;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Direction {
     North,
@@ -11,7 +12,6 @@ pub enum Direction {
     West,
 }
 
-/// The intended maneuver through the intersection
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Route {
     Left,
@@ -19,47 +19,52 @@ pub enum Route {
     Right,
 }
 
-/// Discrete speed levels (v = d/t satisfied by fixed step sizes)
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub enum Speed {
-    Slow   = 1,
-    Normal = 2,
-    Fast   = 3,
+    Slow = 1,
+    Medium = 2,
+    Fast = 3,
 }
 
 impl Speed {
     pub fn pixels_per_tick(self) -> f32 {
         match self {
-            Speed::Slow   => 1.5,
-            Speed::Normal => 2.5,
-            Speed::Fast   => 4.0,
+            Speed::Slow => 1.5,
+            Speed::Medium => 2.5,
+            Speed::Fast => 4.0,
         }
     }
 
     pub fn downshift(self) -> Speed {
         match self {
-            Speed::Fast   => Speed::Normal,
-            Speed::Normal => Speed::Slow,
-            Speed::Slow   => Speed::Slow,
+            Speed::Fast => Speed::Medium,
+            Speed::Medium => Speed::Slow,
+            Speed::Slow => Speed::Slow,
+        }
+    }
+
+    pub fn upshift(self) -> Speed {
+        match self {
+            Speed::Slow => Speed::Medium,
+            Speed::Medium => Speed::Fast,
+            Speed::Fast => Speed::Fast,
         }
     }
 }
 
-/// Waypoint along the curved / straight path through the intersection
 #[derive(Clone, Debug)]
 pub struct Waypoint {
     pub x: f32,
     pub y: f32,
 }
 
-/// One autonomous vehicle
 pub struct Vehicle {
     pub id: u32,
     pub x: f32,
     pub y: f32,
-    pub angle: f32,           // degrees, for smooth rotation rendering
+    pub angle: f32,
     pub speed: Speed,
-    pub direction: Direction, // entry direction
+    pub direction: Direction,
     pub route: Route,
     pub waypoints: Vec<Waypoint>,
     pub waypoint_index: usize,
@@ -67,11 +72,9 @@ pub struct Vehicle {
     pub exit_time: Option<Instant>,
     pub active: bool,
     pub in_intersection: bool,
-    /// reservation slot granted by the intersection manager
     pub reservation_id: Option<u32>,
-    pub color_r: u8,
-    pub color_g: u8,
-    pub color_b: u8,
+    pub sprite_index: u8,
+    pub anim: AnimState,
 }
 
 impl Vehicle {
@@ -82,20 +85,21 @@ impl Vehicle {
         direction: Direction,
         route: Route,
         waypoints: Vec<Waypoint>,
-        color: (u8, u8, u8),
+        sprite_index: u8,
     ) -> Self {
         let initial_angle = match direction {
             Direction::North => 180.0,
             Direction::South => 0.0,
-            Direction::East  => 270.0,
-            Direction::West  => 90.0,
+            Direction::East => 270.0,
+            Direction::West => 90.0,
         };
-        Vehicle {
+
+        Self {
             id,
             x: start_x,
             y: start_y,
             angle: initial_angle,
-            speed: Speed::Normal,
+            speed: Speed::Medium,
             direction,
             route,
             waypoints,
@@ -105,14 +109,12 @@ impl Vehicle {
             active: true,
             in_intersection: false,
             reservation_id: None,
-            color_r: color.0,
-            color_g: color.1,
-            color_b: color.2,
+            sprite_index,
+            anim: AnimState::new(initial_angle),
         }
     }
 
-    /// Advance vehicle toward next waypoint. Returns true when the vehicle
-    /// has consumed all waypoints and should be removed.
+    /// Advance one simulation tick. Returns true when this vehicle is finished.
     pub fn advance(&mut self) -> bool {
         if self.waypoint_index >= self.waypoints.len() {
             if self.exit_time.is_none() {
@@ -128,10 +130,11 @@ impl Vehicle {
         let dist = (dx * dx + dy * dy).sqrt();
         let step = self.speed.pixels_per_tick();
 
-        // Smoothly rotate toward waypoint direction
         let target_angle = dy.atan2(dx).to_degrees() + 90.0;
         let angle_diff = normalize_angle(target_angle - self.angle);
-        self.angle += angle_diff * 0.15; // lerp factor for smooth rotation
+        self.angle += angle_diff * 0.15;
+
+        self.anim.tick(self.angle);
 
         if dist <= step {
             self.x = wp.x;
@@ -144,7 +147,6 @@ impl Vehicle {
         false
     }
 
-    /// Remaining waypoints as predicted path (for reservation checks)
     pub fn predicted_path(&self) -> &[Waypoint] {
         if self.waypoint_index < self.waypoints.len() {
             &self.waypoints[self.waypoint_index..]
@@ -153,7 +155,6 @@ impl Vehicle {
         }
     }
 
-    /// Euclidean distance to another vehicle
     pub fn distance_to(&self, other: &Vehicle) -> f32 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
@@ -168,7 +169,11 @@ impl Vehicle {
 
 fn normalize_angle(a: f32) -> f32 {
     let mut a = a % 360.0;
-    if a > 180.0  { a -= 360.0; }
-    if a < -180.0 { a += 360.0; }
+    if a > 180.0 {
+        a -= 360.0;
+    }
+    if a < -180.0 {
+        a += 360.0;
+    }
     a
 }

@@ -1,52 +1,105 @@
-// stats.rs — Statistics collector for the simulation
+// stats.rs - Runtime metrics for the AV intersection simulation.
 
 pub struct Stats {
-    pub total_vehicles: u32,
-    pub max_speed: f32,
-    pub min_speed: f32,
-    pub max_crossing_time: f32,
-    pub min_crossing_time: f32,
+    pub total_vehicles_passed: u32,
+    pub max_velocity: f32,
+    pub min_velocity: f32,
+    pub max_time: f32,
+    pub min_time: f32,
     pub close_calls: u32,
 }
 
 impl Stats {
     pub fn new() -> Self {
-        Stats {
-            total_vehicles: 0,
-            max_speed: f32::NEG_INFINITY,
-            min_speed: f32::INFINITY,
-            max_crossing_time: f32::NEG_INFINITY,
-            min_crossing_time: f32::INFINITY,
+        Self {
+            total_vehicles_passed: 0,
+            max_velocity: f32::NEG_INFINITY,
+            min_velocity: f32::INFINITY,
+            max_time: f32::NEG_INFINITY,
+            min_time: f32::INFINITY,
             close_calls: 0,
         }
     }
 
-    pub fn record_vehicle(&mut self, pixels_per_tick: f32, crossing_secs: f32) {
-        self.total_vehicles += 1;
-        if pixels_per_tick > self.max_speed { self.max_speed = pixels_per_tick; }
-        if pixels_per_tick < self.min_speed { self.min_speed = pixels_per_tick; }
-        if crossing_secs > self.max_crossing_time { self.max_crossing_time = crossing_secs; }
-        if crossing_secs < self.min_crossing_time { self.min_crossing_time = crossing_secs; }
+    pub fn observe_velocity(&mut self, velocity: f32) {
+        if velocity > self.max_velocity {
+            self.max_velocity = velocity;
+        }
+        if velocity < self.min_velocity {
+            self.min_velocity = velocity;
+        }
+    }
+
+    pub fn record_passed_vehicle(&mut self, crossing_time: f32) {
+        self.total_vehicles_passed += 1;
+        if crossing_time > self.max_time {
+            self.max_time = crossing_time;
+        }
+        if crossing_time < self.min_time {
+            self.min_time = crossing_time;
+        }
     }
 
     pub fn record_close_call(&mut self) {
         self.close_calls += 1;
     }
 
-    pub fn report(&self) -> Vec<String> {
-        let v_max = if self.max_speed.is_finite() { format!("{:.1} px/tick", self.max_speed) } else { "N/A".into() };
-        let v_min = if self.min_speed.is_finite() { format!("{:.1} px/tick", self.min_speed) } else { "N/A".into() };
-        let t_max = if self.max_crossing_time.is_finite() { format!("{:.2} s", self.max_crossing_time) } else { "N/A".into() };
-        let t_min = if self.min_crossing_time.is_finite() { format!("{:.2} s", self.min_crossing_time) } else { "N/A".into() };
-
+    pub fn report_lines(&self) -> Vec<String> {
         vec![
-            format!("=== Smart Road Statistics ==="),
-            format!("Total vehicles:         {}", self.total_vehicles),
-            format!("Fastest speed (v_max):  {}", v_max),
-            format!("Slowest speed (v_min):  {}", v_min),
-            format!("Longest crossing time:  {}", t_max),
-            format!("Shortest crossing time: {}", t_min),
-            format!("Close calls:            {}", self.close_calls),
+            "=== Smart Road Statistics ===".to_string(),
+            format!(
+                "Maximum number of vehicles passed: {}",
+                self.total_vehicles_passed
+            ),
+            format!(
+                "Maximum velocity reached: {}",
+                fmt(self.max_velocity, "px/s")
+            ),
+            format!(
+                "Minimum velocity reached: {}",
+                fmt(self.min_velocity, "px/s")
+            ),
+            format!(
+                "Maximum time taken by a vehicle: {}",
+                fmt(self.max_time, "s")
+            ),
+            format!(
+                "Minimum time taken by a vehicle: {}",
+                fmt(self.min_time, "s")
+            ),
+            format!("Number of close calls: {}", self.close_calls),
         ]
+    }
+
+    pub fn dashboard_lines(&self) -> Vec<String> {
+        vec![
+            "SMART ROAD STATISTICS".to_string(),
+            format!("MAX VEHICLES PASSED: {}", self.total_vehicles_passed),
+            format!("MAX VELOCITY: {}", fmt(self.max_velocity, "PX/S")),
+            format!("MIN VELOCITY: {}", fmt(self.min_velocity, "PX/S")),
+            format!("MAX TIME: {}", fmt(self.max_time, "S")),
+            format!("MIN TIME: {}", fmt(self.min_time, "S")),
+            format!("CLOSE CALLS: {}", self.close_calls),
+        ]
+    }
+
+    pub fn summary_title(&self) -> String {
+        format!(
+            "Stats | passed={} vmax={} vmin={} tmax={} tmin={} close={}",
+            self.total_vehicles_passed,
+            fmt(self.max_velocity, "px/s"),
+            fmt(self.min_velocity, "px/s"),
+            fmt(self.max_time, "s"),
+            fmt(self.min_time, "s"),
+            self.close_calls
+        )
+    }
+}
+
+fn fmt(v: f32, unit: &str) -> String {
+    if v.is_finite() {
+        format!("{:.2} {}", v, unit)
+    } else {
+        "N/A".to_string()
     }
 }
