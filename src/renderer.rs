@@ -6,7 +6,7 @@ use sdl2::render::{BlendMode, Canvas, Texture, TextureCreator};
 use sdl2::surface::Surface;
 use sdl2::video::{Window, WindowContext};
 
-use crate::animation::AnimDir;
+use crate::animation::{AnimDir, FRAME_COLS, FRAME_ROWS};
 use crate::intersection::{GUIDE_LINE_SPACING, ISECT_CX, ISECT_CY};
 use crate::stats::Stats;
 use crate::vehicle::Vehicle;
@@ -14,40 +14,58 @@ use crate::vehicle::Vehicle;
 const CAR_W: u32 = 26;
 const CAR_H: u32 = 46;
 
+pub struct SpriteSheet {
+    pub texture: Texture,
+    frame_rects: Vec<Rect>,
+}
+
+impl SpriteSheet {
+    fn frame_rect(&self, dir: AnimDir, frame: u8) -> Rect {
+        let cols = FRAME_COLS as usize;
+        let idx = (dir as usize * cols) + (frame as usize % cols);
+        self.frame_rects[idx]
+    }
+}
+
 pub struct GameTextures {
     pub map: Texture,
     /// v1.png .. v7.png, indexed 0..6.
-    pub sprites: Vec<Texture>,
+    pub sprites: Vec<SpriteSheet>,
 }
 
 impl GameTextures {
     pub fn load(tc: &TextureCreator<WindowContext>) -> Self {
+        let map = load_png_texture(tc, include_bytes!("assets/map2.png"), false);
+
         Self {
-            map: load_png(tc, include_bytes!("assets/map2.png"), false),
+            map,
             sprites: vec![
-                load_png(tc, include_bytes!("assets/v1.png"), true),
-                load_png(tc, include_bytes!("assets/v2.png"), true),
-                load_png(tc, include_bytes!("assets/v3.png"), true),
-                load_png(tc, include_bytes!("assets/v4.png"), true),
-                load_png(tc, include_bytes!("assets/v5.png"), true),
-                load_png(tc, include_bytes!("assets/v6.png"), true),
-                load_png(tc, include_bytes!("assets/v7.png"), true),
+                load_sprite_sheet(tc, include_bytes!("assets/v1.png")),
+                load_sprite_sheet(tc, include_bytes!("assets/v2.png")),
+                load_sprite_sheet(tc, include_bytes!("assets/v3.png")),
+                load_sprite_sheet(tc, include_bytes!("assets/v4.png")),
+                load_sprite_sheet(tc, include_bytes!("assets/v5.png")),
+                load_sprite_sheet(tc, include_bytes!("assets/v6.png")),
+                load_sprite_sheet(tc, include_bytes!("assets/v7.png")),
             ],
         }
     }
 }
 
-fn load_png(tc: &TextureCreator<WindowContext>, bytes: &[u8], alpha_blend: bool) -> Texture {
+struct DecodedPng {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+fn decode_png(bytes: &[u8]) -> DecodedPng {
     let mut decoder = png::Decoder::new(bytes);
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().expect("PNG read_info");
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).expect("PNG next_frame");
 
-    let w = info.width;
-    let h = info.height;
-
-    let mut rgba: Vec<u8> = match info.color_type {
+    let rgba: Vec<u8> = match info.color_type {
         png::ColorType::Rgba => buf[..info.buffer_size()].to_vec(),
         png::ColorType::Rgb => buf[..info.buffer_size()]
             .chunks_exact(3)
@@ -64,7 +82,21 @@ fn load_png(tc: &TextureCreator<WindowContext>, bytes: &[u8], alpha_blend: bool)
         other => panic!("Unsupported PNG color type: {:?}", other),
     };
 
-    let surface = Surface::from_data(&mut rgba, w, h, w * 4, PixelFormatEnum::ABGR8888)
+    DecodedPng {
+        width: info.width,
+        height: info.height,
+        rgba,
+    }
+}
+
+fn texture_from_rgba(
+    tc: &TextureCreator<WindowContext>,
+    rgba: &mut [u8],
+    w: u32,
+    h: u32,
+    alpha_blend: bool,
+) -> Texture {
+    let surface = Surface::from_data(rgba, w, h, w * 4, PixelFormatEnum::ABGR8888)
         .expect("Surface::from_data");
 
     let mut tex = tc
@@ -76,6 +108,130 @@ fn load_png(tc: &TextureCreator<WindowContext>, bytes: &[u8], alpha_blend: bool)
     }
 
     tex
+}
+
+fn load_png_texture(tc: &TextureCreator<WindowContext>, bytes: &[u8], alpha_blend: bool) -> Texture {
+    let mut decoded = decode_png(bytes);
+    texture_from_rgba(
+        tc,
+        &mut decoded.rgba,
+        decoded.width,
+        decoded.height,
+        alpha_blend,
+    )
+}
+
+fn load_sprite_sheet(tc: &TextureCreator<WindowContext>, bytes: &[u8]) -> SpriteSheet {
+    let mut decoded = decode_png(bytes);
+    let frame_rects = build_sprite_frame_rects(decoded.width, decoded.height, &decoded.rgba);
+    let texture = texture_from_rgba(tc, &mut decoded.rgba, decoded.width, decoded.height, true);
+
+    SpriteSheet {
+        texture,
+        frame_rects,
+    }
+}
+
+fn build_sprite_frame_rects(sheet_w: u32, sheet_h: u32, rgba: &[u8]) -> Vec<Rect> {
+    let col_sums = axis_alpha_sums_x(sheet_w, sheet_h, rgba);
+    let row_sums = axis_alpha_sums_y(sheet_w, sheet_h, rgba);
+
+    let col_bounds = axis_bounds_from_alpha(sheet_w as usize, FRAME_COLS as usize, &col_sums);
+    let row_bounds = axis_bounds_from_alpha(sheet_h as usize, FRAME_ROWS as usize, &row_sums);
+
+    let mut rects = Vec::with_capacity((FRAME_COLS as usize) * (FRAME_ROWS as usize));
+    for row in 0..FRAME_ROWS as usize {
+        let y0 = row_bounds[row] as u32;
+        let y1 = row_bounds[row + 1] as u32;
+        let h = y1.saturating_sub(y0).max(1);
+
+        for col in 0..FRAME_COLS as usize {
+            let x0 = col_bounds[col] as u32;
+            let x1 = col_bounds[col + 1] as u32;
+            let w = x1.saturating_sub(x0).max(1);
+            rects.push(Rect::new(x0 as i32, y0 as i32, w, h));
+        }
+    }
+
+    rects
+}
+
+fn axis_alpha_sums_x(w: u32, h: u32, rgba: &[u8]) -> Vec<u32> {
+    let mut sums = vec![0u32; w as usize];
+    let wu = w as usize;
+
+    for y in 0..h as usize {
+        for x in 0..wu {
+            let i = ((y * wu + x) * 4) + 3;
+            sums[x] += rgba[i] as u32;
+        }
+    }
+
+    sums
+}
+
+fn axis_alpha_sums_y(w: u32, h: u32, rgba: &[u8]) -> Vec<u32> {
+    let mut sums = vec![0u32; h as usize];
+    let wu = w as usize;
+
+    for y in 0..h as usize {
+        let mut sum = 0u32;
+        for x in 0..wu {
+            let i = ((y * wu + x) * 4) + 3;
+            sum += rgba[i] as u32;
+        }
+        sums[y] = sum;
+    }
+
+    sums
+}
+
+fn axis_bounds_from_alpha(len: usize, bins: usize, sums: &[u32]) -> Vec<usize> {
+    debug_assert_eq!(len, sums.len());
+
+    let mut bounds = Vec::with_capacity(bins + 1);
+    bounds.push(0);
+
+    let mut prev_cut = 0usize;
+    for k in 1..bins {
+        let ideal = k * len / bins;
+        let mut radius = len / (bins * 2);
+        radius = radius.max(2);
+
+        let mut start = ideal.saturating_sub(radius);
+        let mut end = (ideal + radius).min(len.saturating_sub(1));
+
+        let remaining_cuts = bins - k;
+        let max_cut = len.saturating_sub(remaining_cuts);
+
+        if start <= prev_cut {
+            start = prev_cut + 1;
+        }
+        if start > max_cut {
+            start = max_cut;
+        }
+        if end < start {
+            end = start;
+        }
+        if end > max_cut {
+            end = max_cut;
+        }
+
+        let mut best = start;
+        let mut best_val = sums[start];
+        for i in start..=end {
+            if sums[i] < best_val {
+                best = i;
+                best_val = sums[i];
+            }
+        }
+
+        bounds.push(best);
+        prev_cut = best;
+    }
+
+    bounds.push(len);
+    bounds
 }
 
 pub fn draw_simulation(
@@ -156,8 +312,7 @@ fn draw_vehicle(canvas: &mut Canvas<Window>, vehicle: &Vehicle, textures: &GameT
     }
 
     let sheet = &textures.sprites[(vehicle.sprite_index as usize).min(textures.sprites.len() - 1)];
-    let sheet_info = sheet.query();
-    let src = vehicle.anim.src_rect(sheet_info.width, sheet_info.height);
+    let src = sheet.frame_rect(vehicle.anim.dir, vehicle.anim.frame);
 
     let dest = Rect::new(
         vehicle.x as i32 - CAR_W as i32 / 2,
@@ -170,7 +325,7 @@ fn draw_vehicle(canvas: &mut Canvas<Window>, vehicle: &Vehicle, textures: &GameT
     let base = row_base_angle(vehicle.anim.dir);
     let rot = normalize_degrees(vehicle.angle as f64 - base);
 
-    let _ = canvas.copy_ex(sheet, Some(src), Some(dest), rot, None, false, false);
+    let _ = canvas.copy_ex(&sheet.texture, Some(src), Some(dest), rot, None, false, false);
 }
 
 fn row_base_angle(dir: AnimDir) -> f64 {

@@ -7,8 +7,6 @@
 //
 // The source textures are 3 columns x 4 rows.
 
-use sdl2::rect::Rect;
-
 /// Number of frame columns per row.
 pub const FRAME_COLS: u8 = 3;
 /// Number of direction rows.
@@ -77,15 +75,4 @@ impl AnimState {
         }
     }
 
-    /// Source rectangle inside the sprite sheet for the current frame.
-    pub fn src_rect(&self, sheet_w: u32, sheet_h: u32) -> Rect {
-        let frame_w = (sheet_w / FRAME_COLS as u32).max(1);
-        let frame_h = (sheet_h / FRAME_ROWS as u32).max(1);
-        Rect::new(
-            self.frame as i32 * frame_w as i32,
-            self.dir as i32 * frame_h as i32,
-            frame_w,
-            frame_h,
-        )
-    }
 }
