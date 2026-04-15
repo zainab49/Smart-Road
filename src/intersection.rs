@@ -281,8 +281,16 @@ impl Intersection {
 }
 
 /// Lane id on the inbound side for spacing/following checks.
-pub fn incoming_lane_id(_direction: Direction, route: Route) -> i8 {
-    route_lane_idx(route) as i8
+pub fn incoming_lane_id(direction: Direction, route: Route) -> i8 {
+    // Create unique lane IDs: direction * 3 + route 
+    // This ensures each direction/route combo gets a unique lane ID
+    let dir_offset = match direction {
+        Direction::North => 0,
+        Direction::South => 3,
+        Direction::East => 6, 
+        Direction::West => 9,
+    };
+    dir_offset + route_lane_idx(route) as i8
 }
 
 fn route_lane_idx(route: Route) -> usize {

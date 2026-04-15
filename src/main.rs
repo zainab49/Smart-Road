@@ -210,39 +210,79 @@ fn spawn_vehicle(
     direction: Direction,
     route: Route,
 ) -> bool {
-    let (x, y) = Intersection::spawn_position(direction, route);
-    if spawn_blocked(vehicles, direction, route, x, y) {
-        return false;
+    let (mut x, mut y) = Intersection::spawn_position(direction, route);
+    
+    // Add random offset to prevent exact same spawn positions
+    let offset = rng.gen_range(-8.0..=8.0);
+    match direction {
+        Direction::North | Direction::South => x += offset,
+        Direction::East | Direction::West => y += offset,
     }
+    
+    // Try multiple spawn positions if blocked
+    for _attempt in 0..5 {
+        if !spawn_blocked(vehicles, direction, route, x, y) {
+            let sprite_index = rng.gen_range(0..7) as u8;
+            let waypoints = Intersection::build_waypoints(direction, route);
+            let mut vehicle = Vehicle::new(
+                *next_vehicle_id,
+                x,
+                y,
+                direction,
+                route,
+                waypoints,
+                sprite_index,
+            );
+            vehicle.speed = random_speed(rng);
 
-    let sprite_index = rng.gen_range(0..7) as u8;
-    let waypoints = Intersection::build_waypoints(direction, route);
-    let mut vehicle = Vehicle::new(
-        *next_vehicle_id,
-        x,
-        y,
-        direction,
-        route,
-        waypoints,
-        sprite_index,
-    );
-    vehicle.speed = random_speed(rng);
-
-    vehicles.push(vehicle);
-    *next_vehicle_id += 1;
-    true
+            vehicles.push(vehicle);
+            *next_vehicle_id += 1;
+            return true;
+        }
+        
+        // Move spawn position further back for next attempt
+        match direction {
+            Direction::North => y -= SAFE_DISTANCE,
+            Direction::South => y += SAFE_DISTANCE,
+            Direction::East => x += SAFE_DISTANCE,
+            Direction::West => x -= SAFE_DISTANCE,
+        }
+    }
+    false
 }
 
 fn spawn_blocked(vehicles: &[Vehicle], direction: Direction, route: Route, x: f32, y: f32) -> bool {
     let lane = incoming_lane_id(direction, route);
-    vehicles.iter().any(|v| {
-        if v.direction != direction || incoming_lane_id(v.direction, v.route) != lane {
-            return false;
+    
+    for vehicle in vehicles {
+        // Only check vehicles in the same lane (same direction AND route)
+        if incoming_lane_id(vehicle.direction, vehicle.route) != lane {
+            continue;
         }
-        let dx = v.x - x;
-        let dy = v.y - y;
-        (dx * dx + dy * dy).sqrt() < SAFE_DISTANCE * 1.2
-    })
+        
+        // Calculate distance between vehicles
+        let dx = vehicle.x - x;
+        let dy = vehicle.y - y;
+        let distance = (dx * dx + dy * dy).sqrt();
+        
+        // Check if too close in any direction (minimum safety buffer)
+        if distance < SAFE_DISTANCE * 2.0 {
+            return true;
+        }
+        
+        // Additional check: make sure no vehicle is immediately ahead in spawn path
+        let is_too_close_ahead = match direction {
+            Direction::North => vehicle.y > y && vehicle.y - y < SAFE_DISTANCE * 3.0,
+            Direction::South => vehicle.y < y && y - vehicle.y < SAFE_DISTANCE * 3.0,
+            Direction::East => vehicle.x < x && x - vehicle.x < SAFE_DISTANCE * 3.0,
+            Direction::West => vehicle.x > x && vehicle.x - x < SAFE_DISTANCE * 3.0,
+        };
+        
+        if is_too_close_ahead {
+            return true;
+        }
+    }
+    false
 }
 
 fn random_direction(rng: &mut rand::rngs::ThreadRng) -> Direction {
@@ -275,13 +315,18 @@ fn apply_following_logic(vehicles: &mut [Vehicle]) {
         let mut nearest_ahead = f32::INFINITY;
 
         for j in 0..vehicles.len() {
-            if i == j
-                || vehicles[i].direction != vehicles[j].direction
-                || incoming_lane_id(vehicles[i].direction, vehicles[i].route)
-                    != incoming_lane_id(vehicles[j].direction, vehicles[j].route)
+            if i == j {
+                continue;
+            }
+            
+            // Only consider vehicles in the same lane (same direction AND route)
+            if incoming_lane_id(vehicles[i].direction, vehicles[i].route)
+                != incoming_lane_id(vehicles[j].direction, vehicles[j].route)
             {
                 continue;
             }
+            
+            // Check if vehicle j is ahead of vehicle i
             if !is_ahead(&vehicles[i], &vehicles[j]) {
                 continue;
             }
@@ -292,9 +337,10 @@ fn apply_following_logic(vehicles: &mut [Vehicle]) {
             }
         }
 
-        let target_speed = if nearest_ahead < SAFE_DISTANCE {
+        // Much more conservative following distances to prevent overlapping
+        let target_speed = if nearest_ahead < SAFE_DISTANCE * 1.2 {
             Speed::Slow
-        } else if nearest_ahead < SAFE_DISTANCE * 1.8 {
+        } else if nearest_ahead < SAFE_DISTANCE * 2.0 {
             Speed::Medium
         } else {
             Speed::Fast
@@ -307,6 +353,7 @@ fn apply_following_logic(vehicles: &mut [Vehicle]) {
             target_speed
         };
 
+        // Adjust speed more gradually to prevent sudden changes
         if vehicles[i].speed < route_limited {
             vehicles[i].speed = vehicles[i].speed.upshift();
         } else if vehicles[i].speed > route_limited {
@@ -329,6 +376,49 @@ fn lane_gap(self_v: &Vehicle, other: &Vehicle) -> f32 {
         Direction::North | Direction::South => (other.y - self_v.y).abs(),
         Direction::East | Direction::West => (other.x - self_v.x).abs(),
     }
+}
+
+fn check_would_collide(vehicles: &[Vehicle], vehicle_idx: usize) -> bool {
+    let vehicle = &vehicles[vehicle_idx];
+    let lane = incoming_lane_id(vehicle.direction, vehicle.route);
+    
+    // Calculate where vehicle would be after advancing
+    let step = vehicle.speed.pixels_per_tick();
+    let (next_x, next_y) = if vehicle.waypoint_index < vehicle.waypoints.len() {
+        let wp = &vehicle.waypoints[vehicle.waypoint_index];
+        let dx = wp.x - vehicle.x;
+        let dy = wp.y - vehicle.y;
+        let dist = (dx * dx + dy * dy).sqrt();
+        
+        if dist <= step {
+            (wp.x, wp.y)
+        } else {
+            (
+                vehicle.x + (dx / dist) * step,
+                vehicle.y + (dy / dist) * step,
+            )
+        }
+    } else {
+        (vehicle.x, vehicle.y)
+    };
+    
+    // Check if this would put us too close to any other vehicle in the same lane
+    for (i, other) in vehicles.iter().enumerate() {
+        if i == vehicle_idx || incoming_lane_id(other.direction, other.route) != lane {
+            continue;
+        }
+        
+        let dx = other.x - next_x;
+        let dy = other.y - next_y;
+        let distance = (dx * dx + dy * dy).sqrt();
+        
+        // Prevent getting closer than minimum safe distance
+        if distance < SAFE_DISTANCE * 0.9 {
+            return true;
+        }
+    }
+    
+    false
 }
 
 fn update_reservations_and_move(
@@ -363,6 +453,15 @@ fn update_reservations_and_move(
 
     for i in 0..vehicles.len() {
         if wait_for_slot[i] {
+            stats.observe_velocity(0.0);
+            continue;
+        }
+
+        // CRITICAL: Check for collision before advancing
+        let would_collide = check_would_collide(&vehicles, i);
+        if would_collide {
+            // Force stop to prevent collision
+            vehicles[i].speed = Speed::Slow;
             stats.observe_velocity(0.0);
             continue;
         }
