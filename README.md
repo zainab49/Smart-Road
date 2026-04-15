@@ -12,6 +12,10 @@ This project simulates autonomous vehicles moving through a cross intersection w
 
 Vehicles are generated from all four directions, follow fixed routes, keep safe spacing, and are coordinated inside a central conflict area using a reservation-based algorithm.
 
+## Simulator Screenshot
+
+![Smart Road simulator screenshot](src/assets/Screenshot0.png)
+
 ## Implemented Features
 
 - 4-way intersection simulation loop (60 FPS target)
