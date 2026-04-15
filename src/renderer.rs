@@ -11,8 +11,8 @@ use crate::intersection::{GUIDE_LINE_SPACING, ISECT_CX, ISECT_CY};
 use crate::stats::Stats;
 use crate::vehicle::Vehicle;
 
-const CAR_W: u32 = 26;
-const CAR_H: u32 = 46;
+const CAR_W: u32 = 34;
+const CAR_H: u32 = 60;
 
 pub struct SpriteSheet {
     pub texture: Texture,
