@@ -25,8 +25,9 @@ pub const GRID_Y2: f32 = 560.0;
 // 4-way intersection lane model:
 // each road has 6 lanes total = 3 inbound + 3 outbound.
 pub const LANE_SPACING: f32 = 34.0;
+pub const GUIDE_LINE_SPACING: f32 = LANE_SPACING * 1.45;
 const LANES_PER_DIRECTION: usize = 3;
-const ROAD_HALF_WIDTH: f32 = LANE_SPACING * LANES_PER_DIRECTION as f32;
+const ROAD_HALF_WIDTH: f32 = GUIDE_LINE_SPACING * LANES_PER_DIRECTION as f32;
 
 /// Safe following distance in pixels.
 pub const SAFE_DISTANCE: f32 = 55.0;
@@ -70,9 +71,11 @@ impl Intersection {
                 WINDOW_H as f32 + 20.0,
             ),
             (Direction::North, Route::Right) => extend_with_straight(
-                curve_points(
+                turn_path(
                     north_inbound_x(Route::Right),
                     -20.0,
+                    north_inbound_x(Route::Right),
+                    ISECT_Y1,
                     ISECT_X1,
                     west_outbound_y(Route::Right),
                     true,
@@ -81,9 +84,11 @@ impl Intersection {
                 west_outbound_y(Route::Right),
             ),
             (Direction::North, Route::Left) => extend_with_straight(
-                curve_points(
+                turn_path(
                     north_inbound_x(Route::Left),
                     -20.0,
+                    north_inbound_x(Route::Left),
+                    ISECT_Y2,
                     ISECT_X2,
                     east_outbound_y(Route::Left),
                     false,
@@ -99,9 +104,11 @@ impl Intersection {
                 -20.0,
             ),
             (Direction::South, Route::Right) => extend_with_straight(
-                curve_points(
+                turn_path(
                     south_inbound_x(Route::Right),
                     WINDOW_H as f32 + 20.0,
+                    south_inbound_x(Route::Right),
+                    ISECT_Y2,
                     ISECT_X2,
                     east_outbound_y(Route::Right),
                     true,
@@ -110,9 +117,11 @@ impl Intersection {
                 east_outbound_y(Route::Right),
             ),
             (Direction::South, Route::Left) => extend_with_straight(
-                curve_points(
+                turn_path(
                     south_inbound_x(Route::Left),
                     WINDOW_H as f32 + 20.0,
+                    south_inbound_x(Route::Left),
+                    ISECT_Y1,
                     ISECT_X1,
                     west_outbound_y(Route::Left),
                     false,
@@ -128,8 +137,10 @@ impl Intersection {
                 east_outbound_y(Route::Straight),
             ),
             (Direction::West, Route::Right) => extend_with_straight(
-                curve_points(
+                turn_path(
                     -20.0,
+                    west_inbound_y(Route::Right),
+                    ISECT_X1,
                     west_inbound_y(Route::Right),
                     south_outbound_x(Route::Right),
                     ISECT_Y2,
@@ -139,8 +150,10 @@ impl Intersection {
                 WINDOW_H as f32 + 20.0,
             ),
             (Direction::West, Route::Left) => extend_with_straight(
-                curve_points(
+                turn_path(
                     -20.0,
+                    west_inbound_y(Route::Left),
+                    ISECT_X2,
                     west_inbound_y(Route::Left),
                     north_outbound_x(Route::Left),
                     ISECT_Y1,
@@ -157,8 +170,10 @@ impl Intersection {
                 west_outbound_y(Route::Straight),
             ),
             (Direction::East, Route::Right) => extend_with_straight(
-                curve_points(
+                turn_path(
                     WINDOW_W as f32 + 20.0,
+                    east_inbound_y(Route::Right),
+                    ISECT_X2,
                     east_inbound_y(Route::Right),
                     north_outbound_x(Route::Right),
                     ISECT_Y1,
@@ -168,8 +183,10 @@ impl Intersection {
                 -20.0,
             ),
             (Direction::East, Route::Left) => extend_with_straight(
-                curve_points(
+                turn_path(
                     WINDOW_W as f32 + 20.0,
+                    east_inbound_y(Route::Left),
+                    ISECT_X1,
                     east_inbound_y(Route::Left),
                     south_outbound_x(Route::Left),
                     ISECT_Y2,
@@ -276,30 +293,6 @@ pub fn incoming_lane_id(_direction: Direction, route: Route) -> i8 {
     route_lane_idx(route) as i8
 }
 
-/// Six lane center lines on the vertical road (x coordinates).
-pub fn vertical_lane_centers() -> [f32; 6] {
-    [
-        ISECT_CX - lane_offset(0),
-        ISECT_CX - lane_offset(1),
-        ISECT_CX - lane_offset(2),
-        ISECT_CX + lane_offset(2),
-        ISECT_CX + lane_offset(1),
-        ISECT_CX + lane_offset(0),
-    ]
-}
-
-/// Six lane center lines on the horizontal road (y coordinates).
-pub fn horizontal_lane_centers() -> [f32; 6] {
-    [
-        ISECT_CY - lane_offset(0),
-        ISECT_CY - lane_offset(1),
-        ISECT_CY - lane_offset(2),
-        ISECT_CY + lane_offset(2),
-        ISECT_CY + lane_offset(1),
-        ISECT_CY + lane_offset(0),
-    ]
-}
-
 fn route_lane_idx(route: Route) -> usize {
     match route {
         Route::Right => 0,
@@ -309,7 +302,7 @@ fn route_lane_idx(route: Route) -> usize {
 }
 
 fn lane_offset(lane_idx: usize) -> f32 {
-    ROAD_HALF_WIDTH - (lane_idx as f32 + 0.5) * LANE_SPACING
+    ROAD_HALF_WIDTH - (lane_idx as f32 + 0.5) * GUIDE_LINE_SPACING
 }
 
 fn north_inbound_x(route: Route) -> f32 {
@@ -364,6 +357,27 @@ fn extend_with_straight(mut path: Vec<Waypoint>, x1: f32, y1: f32) -> Vec<Waypoi
 
     let tail = straight_points(last.x, last.y, x1, y1);
     path.extend(tail.into_iter().skip(1));
+    path
+}
+
+fn turn_path(
+    x0: f32,
+    y0: f32,
+    turn_entry_x: f32,
+    turn_entry_y: f32,
+    curve_exit_x: f32,
+    curve_exit_y: f32,
+    clockwise: bool,
+) -> Vec<Waypoint> {
+    let mut path = straight_points(x0, y0, turn_entry_x, turn_entry_y);
+    let arc = curve_points(
+        turn_entry_x,
+        turn_entry_y,
+        curve_exit_x,
+        curve_exit_y,
+        clockwise,
+    );
+    path.extend(arc.into_iter().skip(1));
     path
 }
 

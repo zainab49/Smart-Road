@@ -7,15 +7,12 @@ use sdl2::surface::Surface;
 use sdl2::video::{Window, WindowContext};
 
 use crate::animation::AnimDir;
-use crate::intersection::{
-    horizontal_lane_centers, vertical_lane_centers, CONFLICT_GRID_DIVS, GRID_X1, GRID_X2, GRID_Y1,
-    GRID_Y2, ISECT_CX, ISECT_CY, LANE_SPACING,
-};
+use crate::intersection::{GUIDE_LINE_SPACING, ISECT_CX, ISECT_CY};
 use crate::stats::Stats;
 use crate::vehicle::Vehicle;
 
-const CAR_W: u32 = 56;
-const CAR_H: u32 = 98;
+const CAR_W: u32 = 26;
+const CAR_H: u32 = 46;
 
 pub struct GameTextures {
     pub map: Texture,
@@ -26,7 +23,7 @@ pub struct GameTextures {
 impl GameTextures {
     pub fn load(tc: &TextureCreator<WindowContext>) -> Self {
         Self {
-            map: load_png(tc, include_bytes!("assets/map.png"), false),
+            map: load_png(tc, include_bytes!("assets/map2.png"), false),
             sprites: vec![
                 load_png(tc, include_bytes!("assets/v1.png"), true),
                 load_png(tc, include_bytes!("assets/v2.png"), true),
@@ -102,62 +99,18 @@ pub fn draw_simulation(
 fn draw_pale_conflict_grid(canvas: &mut Canvas<Window>, win_w: u32, win_h: u32) {
     let _ = canvas.set_blend_mode(BlendMode::Blend);
 
-    let road_half = (LANE_SPACING * 3.0).round() as i32;
-    let vertical_road = Rect::new(
-        ISECT_CX as i32 - road_half,
-        0,
-        (road_half * 2) as u32,
-        win_h,
-    );
-    let horizontal_road = Rect::new(
-        0,
-        ISECT_CY as i32 - road_half,
-        win_w,
-        (road_half * 2) as u32,
-    );
-    canvas.set_draw_color(Color::RGBA(74, 78, 88, 120));
-    let _ = canvas.fill_rect(vertical_road);
-    let _ = canvas.fill_rect(horizontal_road);
-
-    let zone = Rect::new(
-        GRID_X1 as i32,
-        GRID_Y1 as i32,
-        (GRID_X2 - GRID_X1) as u32,
-        (GRID_Y2 - GRID_Y1) as u32,
-    );
-
-    // Pale fill and border
-    canvas.set_draw_color(Color::RGBA(220, 226, 236, 30));
-    let _ = canvas.fill_rect(zone);
-    canvas.set_draw_color(Color::RGBA(230, 236, 246, 80));
-    let _ = canvas.draw_rect(zone);
-
-    // Pale inner grid lines
-    let cell_w = (GRID_X2 - GRID_X1) / CONFLICT_GRID_DIVS as f32;
-    let cell_h = (GRID_Y2 - GRID_Y1) / CONFLICT_GRID_DIVS as f32;
-    canvas.set_draw_color(Color::RGBA(230, 236, 246, 65));
-    for i in 1..CONFLICT_GRID_DIVS {
-        let x = (GRID_X1 + cell_w * i as f32).round() as i32;
-        let y = (GRID_Y1 + cell_h * i as f32).round() as i32;
-        let _ = canvas.draw_line(Point::new(x, GRID_Y1 as i32), Point::new(x, GRID_Y2 as i32));
-        let _ = canvas.draw_line(Point::new(GRID_X1 as i32, y), Point::new(GRID_X2 as i32, y));
-    }
-
-    // Six-lane guides per road (3 inbound + 3 outbound).
-    let lane_x = vertical_lane_centers();
-    let lane_y = horizontal_lane_centers();
-
+    // Draw exactly 7 vertical and 7 horizontal lines centered on the map.
     canvas.set_draw_color(Color::RGBA(245, 236, 170, 80));
-    for x in lane_x {
+    for i in -3..=3 {
+        let x = (ISECT_CX + i as f32 * GUIDE_LINE_SPACING).round() as i32;
         let _ = canvas.draw_line(
-            Point::new(x.round() as i32, 0),
-            Point::new(x.round() as i32, win_h as i32),
+            Point::new(x, 0),
+            Point::new(x, win_h as i32),
         );
-    }
-    for y in lane_y {
+        let y = (ISECT_CY + i as f32 * GUIDE_LINE_SPACING).round() as i32;
         let _ = canvas.draw_line(
-            Point::new(0, y.round() as i32),
-            Point::new(win_w as i32, y.round() as i32),
+            Point::new(0, y),
+            Point::new(win_w as i32, y),
         );
     }
 }
