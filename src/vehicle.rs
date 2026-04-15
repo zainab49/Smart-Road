@@ -124,17 +124,13 @@ impl Vehicle {
             return true;
         }
 
+        let old_x = self.x;
+        let old_y = self.y;
         let wp = &self.waypoints[self.waypoint_index];
         let dx = wp.x - self.x;
         let dy = wp.y - self.y;
         let dist = (dx * dx + dy * dy).sqrt();
         let step = self.speed.pixels_per_tick();
-
-        let target_angle = dy.atan2(dx).to_degrees() + 90.0;
-        let angle_diff = normalize_angle(target_angle - self.angle);
-        self.angle += angle_diff * 0.15;
-
-        self.anim.tick(self.angle);
 
         if dist <= step {
             self.x = wp.x;
@@ -144,6 +140,21 @@ impl Vehicle {
             self.x += (dx / dist) * step;
             self.y += (dy / dist) * step;
         }
+
+        // Update heading after waypoint advancement so there is no one-frame
+        // mismatch at segment/turn boundaries.
+        let (hx, hy) = if self.waypoint_index < self.waypoints.len() {
+            let next_wp = &self.waypoints[self.waypoint_index];
+            (next_wp.x - self.x, next_wp.y - self.y)
+        } else {
+            (self.x - old_x, self.y - old_y)
+        };
+
+        if hx.abs() > f32::EPSILON || hy.abs() > f32::EPSILON {
+            self.angle = hy.atan2(hx).to_degrees() + 90.0;
+        }
+
+        self.anim.tick(self.angle);
         false
     }
 
@@ -167,13 +178,3 @@ impl Vehicle {
     }
 }
 
-fn normalize_angle(a: f32) -> f32 {
-    let mut a = a % 360.0;
-    if a > 180.0 {
-        a -= 360.0;
-    }
-    if a < -180.0 {
-        a += 360.0;
-    }
-    a
-}

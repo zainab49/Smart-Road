@@ -71,27 +71,25 @@ impl Intersection {
                 WINDOW_H as f32 + 20.0,
             ),
             (Direction::North, Route::Right) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     north_inbound_x(Route::Right),
                     -20.0,
                     north_inbound_x(Route::Right),
-                    ISECT_Y1,
-                    ISECT_X1,
                     west_outbound_y(Route::Right),
-                    true,
+                    north_inbound_x(Route::Right) - GUIDE_LINE_SPACING,
+                    west_outbound_y(Route::Right),
                 ),
                 -20.0,
                 west_outbound_y(Route::Right),
             ),
             (Direction::North, Route::Left) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     north_inbound_x(Route::Left),
                     -20.0,
                     north_inbound_x(Route::Left),
-                    ISECT_Y2,
+                    east_outbound_y(Route::Left),
                     ISECT_X2,
                     east_outbound_y(Route::Left),
-                    false,
                 ),
                 WINDOW_W as f32 + 20.0,
                 east_outbound_y(Route::Left),
@@ -104,27 +102,25 @@ impl Intersection {
                 -20.0,
             ),
             (Direction::South, Route::Right) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     south_inbound_x(Route::Right),
                     WINDOW_H as f32 + 20.0,
                     south_inbound_x(Route::Right),
-                    ISECT_Y2,
-                    ISECT_X2,
                     east_outbound_y(Route::Right),
-                    true,
+                    south_inbound_x(Route::Right) + GUIDE_LINE_SPACING,
+                    east_outbound_y(Route::Right),
                 ),
                 WINDOW_W as f32 + 20.0,
                 east_outbound_y(Route::Right),
             ),
             (Direction::South, Route::Left) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     south_inbound_x(Route::Left),
                     WINDOW_H as f32 + 20.0,
                     south_inbound_x(Route::Left),
-                    ISECT_Y1,
+                    west_outbound_y(Route::Left),
                     ISECT_X1,
                     west_outbound_y(Route::Left),
-                    false,
                 ),
                 -20.0,
                 west_outbound_y(Route::Left),
@@ -137,27 +133,25 @@ impl Intersection {
                 east_outbound_y(Route::Straight),
             ),
             (Direction::West, Route::Right) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     -20.0,
                     west_inbound_y(Route::Right),
-                    ISECT_X1,
+                    south_outbound_x(Route::Right),
                     west_inbound_y(Route::Right),
                     south_outbound_x(Route::Right),
-                    ISECT_Y2,
-                    true,
+                    west_inbound_y(Route::Right) + GUIDE_LINE_SPACING,
                 ),
                 south_outbound_x(Route::Right),
                 WINDOW_H as f32 + 20.0,
             ),
             (Direction::West, Route::Left) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     -20.0,
                     west_inbound_y(Route::Left),
-                    ISECT_X2,
+                    north_outbound_x(Route::Left),
                     west_inbound_y(Route::Left),
                     north_outbound_x(Route::Left),
                     ISECT_Y1,
-                    false,
                 ),
                 north_outbound_x(Route::Left),
                 -20.0,
@@ -170,27 +164,25 @@ impl Intersection {
                 west_outbound_y(Route::Straight),
             ),
             (Direction::East, Route::Right) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     WINDOW_W as f32 + 20.0,
                     east_inbound_y(Route::Right),
-                    ISECT_X2,
+                    north_outbound_x(Route::Right),
                     east_inbound_y(Route::Right),
                     north_outbound_x(Route::Right),
-                    ISECT_Y1,
-                    true,
+                    east_inbound_y(Route::Right) - GUIDE_LINE_SPACING,
                 ),
                 north_outbound_x(Route::Right),
                 -20.0,
             ),
             (Direction::East, Route::Left) => extend_with_straight(
-                turn_path(
+                right_angle_points(
                     WINDOW_W as f32 + 20.0,
                     east_inbound_y(Route::Left),
-                    ISECT_X1,
+                    south_outbound_x(Route::Left),
                     east_inbound_y(Route::Left),
                     south_outbound_x(Route::Left),
                     ISECT_Y2,
-                    false,
                 ),
                 south_outbound_x(Route::Left),
                 WINDOW_H as f32 + 20.0,
@@ -360,43 +352,16 @@ fn extend_with_straight(mut path: Vec<Waypoint>, x1: f32, y1: f32) -> Vec<Waypoi
     path
 }
 
-fn turn_path(
+fn right_angle_points(
     x0: f32,
     y0: f32,
-    turn_entry_x: f32,
-    turn_entry_y: f32,
-    curve_exit_x: f32,
-    curve_exit_y: f32,
-    clockwise: bool,
+    corner_x: f32,
+    corner_y: f32,
+    x1: f32,
+    y1: f32,
 ) -> Vec<Waypoint> {
-    let mut path = straight_points(x0, y0, turn_entry_x, turn_entry_y);
-    let arc = curve_points(
-        turn_entry_x,
-        turn_entry_y,
-        curve_exit_x,
-        curve_exit_y,
-        clockwise,
-    );
-    path.extend(arc.into_iter().skip(1));
+    let mut path = straight_points(x0, y0, corner_x, corner_y);
+    let leg2 = straight_points(corner_x, corner_y, x1, y1);
+    path.extend(leg2.into_iter().skip(1));
     path
-}
-
-/// Quadratic Bezier curve waypoints.
-/// `clockwise` determines which side the control point bulges toward.
-fn curve_points(x0: f32, y0: f32, x2: f32, y2: f32, clockwise: bool) -> Vec<Waypoint> {
-    let cx_offset = if clockwise { x2 - x0 } else { 0.0 };
-    let cy_offset = if clockwise { 0.0 } else { y2 - y0 };
-    let cx1 = x0 + cx_offset;
-    let cy1 = y0 + cy_offset;
-
-    let steps = 60usize;
-    (0..=steps)
-        .map(|i| {
-            let t = i as f32 / steps as f32;
-            let mt = 1.0 - t;
-            let x = mt * mt * x0 + 2.0 * mt * t * cx1 + t * t * x2;
-            let y = mt * mt * y0 + 2.0 * mt * t * cy1 + t * t * y2;
-            Waypoint { x, y }
-        })
-        .collect()
 }
