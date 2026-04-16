@@ -22,6 +22,11 @@ impl Stats {
     }
 
     pub fn observe_velocity(&mut self, velocity: f32) {
+        // Ignore stop/invalid samples so min velocity reflects real movement.
+        if !velocity.is_finite() || velocity <= 0.0 {
+            return;
+        }
+
         if velocity > self.max_velocity {
             self.max_velocity = velocity;
         }
