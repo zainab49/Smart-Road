@@ -211,14 +211,7 @@ fn spawn_vehicle(
     route: Route,
 ) -> bool {
     let (mut x, mut y) = Intersection::spawn_position(direction, route);
-    
-    // Add random offset to prevent exact same spawn positions
-    let offset = rng.gen_range(-8.0..=8.0);
-    match direction {
-        Direction::North | Direction::South => x += offset,
-        Direction::East | Direction::West => y += offset,
-    }
-    
+
     // Try multiple spawn positions if blocked
     for _attempt in 0..5 {
         if !spawn_blocked(vehicles, direction, route, x, y) {
@@ -412,8 +405,8 @@ fn check_would_collide(vehicles: &[Vehicle], vehicle_idx: usize) -> bool {
         let dy = other.y - next_y;
         let distance = (dx * dx + dy * dy).sqrt();
         
-        // Prevent getting closer than minimum safe distance
-        if distance < SAFE_DISTANCE * 0.9 {
+        // Prevent getting closer than the configured minimum safe distance.
+        if distance < SAFE_DISTANCE {
             return true;
         }
     }
